@@ -1,0 +1,18 @@
+#!/bin/sh
+# 01-watchdog.start — backstop hardware watchdog keeper.
+# The initramfs keeper normally owns the device already; opening it
+# here then fails harmlessly. Both echo-write and the busybox
+# watchdog applet (WDIOC_KEEPALIVE) are used for safety.
+for wd in /dev/watchdog0 /dev/watchdog; do
+	[ -e "$wd" ] || continue
+	(
+		while true; do
+			echo 1 > "$wd" 2>/dev/null
+			sleep 3
+		done
+	) &
+	/bin/busybox watchdog -t 5 "$wd" >/dev/null 2>&1 &
+	echo "watchdog keeper on $wd" >> /dev/kmsg 2>/dev/null
+	break
+done
+exit 0

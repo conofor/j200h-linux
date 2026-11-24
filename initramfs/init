@@ -1,0 +1,61 @@
+#!/bin/busybox sh
+/bin/busybox --install -s /bin
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sysfs /sys 2>/dev/null
+
+[ -c /dev/console ] || mknod /dev/console c 5 1
+[ -c /dev/null ] || mknod /dev/null c 1 3
+[ -c /dev/tty ] || mknod /dev/tty c 5 0
+[ -b /dev/mmcblk0 ] || mknod /dev/mmcblk0 b 179 0
+[ -b /dev/mmcblk0p24 ] || mknod /dev/mmcblk0p24 b 179 24
+[ -b /dev/mmcblk0p27 ] || mknod /dev/mmcblk0p27 b 179 27
+
+LOG=/tmp/boot.log
+: > $LOG
+log() { echo "$*" >> $LOG; }
+dump() {
+	sync
+	dd if=$LOG of=/dev/mmcblk0p24 bs=4096 seek=50944 conv=fsync 2>/dev/null
+	sync
+}
+
+# --- pet hardware watchdog from the very start ---
+WDDEV=
+for c in /sys/class/watchdog/watchdog*; do
+	[ -e "$c/dev" ] || continue
+	read MA MI < "$c/dev"
+	mknod /dev/$(basename $c) c $MA $MI 2>/dev/null
+	[ -z "$WDDEV" ] && WDDEV=/dev/$(basename $c)
+done
+[ -z "$WDDEV" ] && WDDEV=/dev/watchdog0
+log "watchdog dev: $WDDEV"
+if [ -c "$WDDEV" ]; then
+	( while true; do echo 1 > $WDDEV 2>/dev/null; sleep 3; done ) &
+	/bin/busybox watchdog -t 5 $WDDEV >/dev/null 2>&1 &
+	log "watchdog keepers started"
+fi
+
+log "=== stage3 $(date) ==="
+log "kernel: $(cat /proc/version 2>&1)"
+log "cmdline: $(cat /proc/cmdline 2>&1)"
+dmesg | tail -40 >> $LOG
+dump
+
+mount -t ext4 -o rw,relatime /dev/mmcblk0p27 /newroot 2>>$LOG
+rc=$?
+log "mount p27 rc=$rc"
+dump
+
+if [ $rc -eq 0 ] && [ -x /newroot/linuxroot/sbin/init ]; then
+	mount --bind /newroot/linuxroot /newroot2 2>>$LOG
+	log "bind rc=$?"
+	dump
+	exec switch_root /newroot2 /sbin/init
+	log "switch_root failed rc=$?"
+else
+	log "ERROR: rootfs not ready"
+fi
+dump
+while true; do sleep 30; done

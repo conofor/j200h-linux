@@ -1,0 +1,8 @@
+#!/bin/sh
+# 05-sshd.start — start sshd directly.
+# The OpenRC `sshd` service fails on this setup ("sshd failed to start"),
+# but the binary itself works fine (verified with `sshd -D -e -d`).
+# /run/sshd (privilege separation dir) is created by 00-devnodes.start.
+mkdir -p /run/sshd 2>/dev/null
+/usr/sbin/sshd >> /var/log/sshd-manual.log 2>&1 &
+exit 0
